@@ -13,10 +13,12 @@ import {
   PrepareRenameParams,
   RenameParams,
   DocumentFormattingParams,
+  ResponseError,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { LspError } from './types';
 
-import { registerDiagnostics } from './features/diagnostics';
+import { registerDiagnostics } from './features/diagnosticsServer';
 import { provideCompletion } from './features/completion';
 import { provideHover } from './features/hover';
 import { provideDefinition } from './features/definition';
@@ -28,6 +30,19 @@ import { provideFormatting } from './features/formatting';
 // Create connection using stdio (works for VS Code IPC and Zed LSP)
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
+
+// Feature modules throw protocol-neutral LspError; the Node connection expects
+// vscode-languageserver's ResponseError to preserve the JSON-RPC error code.
+function withResponseError<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof LspError) {
+      throw new ResponseError(err.code, err.message);
+    }
+    throw err;
+  }
+}
 
 connection.onInitialize((_params: InitializeParams): InitializeResult => {
   return {
@@ -56,12 +71,14 @@ registerDiagnostics(connection, documents);
 
 // Completion
 connection.onCompletion((params: CompletionParams) =>
-  provideCompletion(params, documents),
+  // The protocol-neutral CompletionItem shape is structurally compatible;
+  // `kind` is a plain number rather than the vscode enum.
+  provideCompletion(params, documents) as never,
 );
 
 // Hover
 connection.onHover((params: HoverParams) =>
-  provideHover(params, documents),
+  provideHover(params, documents) as never,
 );
 
 // Go to definition
@@ -71,7 +88,7 @@ connection.onDefinition((params: DefinitionParams) =>
 
 // Document symbols
 connection.onDocumentSymbol((params: DocumentSymbolParams) =>
-  provideDocumentSymbols(params, documents),
+  provideDocumentSymbols(params, documents) as never,
 );
 
 // References
@@ -85,12 +102,12 @@ connection.onPrepareRename((params: PrepareRenameParams) =>
 );
 
 connection.onRenameRequest((params: RenameParams) =>
-  provideRename(params, documents),
+  withResponseError(() => provideRename(params, documents)),
 );
 
 // Formatting
 connection.onDocumentFormatting((params: DocumentFormattingParams) =>
-  provideFormatting(params, documents),
+  withResponseError(() => provideFormatting(params, documents)),
 );
 
 // Attach document manager and start listening

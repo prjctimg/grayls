@@ -1,9 +1,4 @@
-import {
-  Location,
-  ReferenceParams,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentStore, Location } from '../types';
 import {
   findWordOccurrences,
   isCodePosition,
@@ -15,8 +10,12 @@ import { scanSymbols } from '../utils/symbols';
 
 /** All in-file references to the symbol under the cursor. */
 export function provideReferences(
-  params: ReferenceParams,
-  documents: TextDocuments<TextDocument>,
+  params: {
+    textDocument: { uri: string };
+    position: { line: number; character: number };
+    context?: { includeDeclaration?: boolean };
+  },
+  documents: DocumentStore,
 ): Location[] {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];

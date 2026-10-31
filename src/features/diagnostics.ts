@@ -2,24 +2,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as cp from 'child_process';
-import {
-  Connection,
-  Diagnostic,
-  DiagnosticSeverity,
-  TextDocumentChangeEvent,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
-
-// Debounce timer per document URI
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
+import type { Diagnostic } from '../types';
+import { DiagnosticSeverity } from '../types';
 
 // Match: error[E3018]: message\n  --> file.gray:42:10
 // or:    warning[W1234]: message\n  --> file.gray:42:10
 const DIAG_PATTERN =
   /^(error|warning)\[([EW]\d+)\]:\s+(.+)\n\s+-->\s+[^:]+:(\d+):(\d+)/gm;
 
-function parseDiagnostics(output: string): Diagnostic[] {
+export function parseDiagnostics(output: string): Diagnostic[] {
   const diags: Diagnostic[] = [];
   let m: RegExpExecArray | null;
   DIAG_PATTERN.lastIndex = 0;
@@ -45,7 +36,8 @@ function parseDiagnostics(output: string): Diagnostic[] {
   return diags;
 }
 
-function runCheck(text: string): Diagnostic[] {
+/** Run `gray check` on a temporary copy and parse the compiler diagnostics. */
+export function computeDiagnostics(text: string): Diagnostic[] {
   // Write to a temp file so gray can read it (handles unsaved buffers too)
   const tmpFile = path.join(os.tmpdir(), `gray-lsp-${process.pid}.gray`);
   try {
@@ -68,35 +60,4 @@ function runCheck(text: string): Diagnostic[] {
   } finally {
     try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
   }
-}
-
-export function registerDiagnostics(
-  connection: Connection,
-  documents: TextDocuments<TextDocument>,
-): void {
-  function validate(doc: TextDocument): void {
-    const uri = doc.uri;
-    const existing = timers.get(uri);
-    if (existing) clearTimeout(existing);
-
-    timers.set(
-      uri,
-      setTimeout(() => {
-        timers.delete(uri);
-        const diags = runCheck(doc.getText());
-        connection.sendDiagnostics({ uri, diagnostics: diags });
-      }, 300),
-    );
-  }
-
-  documents.onDidOpen((e: TextDocumentChangeEvent<TextDocument>) => validate(e.document));
-  documents.onDidSave((e: TextDocumentChangeEvent<TextDocument>) => validate(e.document));
-  documents.onDidChangeContent((e: TextDocumentChangeEvent<TextDocument>) => validate(e.document));
-
-  documents.onDidClose((e: TextDocumentChangeEvent<TextDocument>) => {
-    const t = timers.get(e.document.uri);
-    if (t) { clearTimeout(t); timers.delete(e.document.uri); }
-    // Clear diagnostics when file is closed
-    connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] });
-  });
 }

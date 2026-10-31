@@ -1,13 +1,5 @@
-import {
-  ErrorCodes,
-  PrepareRenameParams,
-  RenameParams,
-  ResponseError,
-  TextDocuments,
-  TextEdit,
-  WorkspaceEdit,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentStore, WorkspaceEdit } from '../types';
+import { ErrorCodes, LspError } from '../types';
 import { BUILTINS, KEYWORDS, TYPES } from '../utils/gray-data';
 import {
   findWordOccurrences,
@@ -40,8 +32,8 @@ function symbolAt(
 
 /** Validate that the cursor is on a symbol that can be renamed. */
 export function prepareRename(
-  params: PrepareRenameParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string }; position: { line: number; character: number } },
+  documents: DocumentStore,
 ): { range: NonNullable<ReturnType<typeof wordRangeAt>>; placeholder: string } | null {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return null;
@@ -53,12 +45,16 @@ export function prepareRename(
 
 /** File-local rename of every whole-word occurrence of the symbol. */
 export function provideRename(
-  params: RenameParams,
-  documents: TextDocuments<TextDocument>,
+  params: {
+    textDocument: { uri: string };
+    position: { line: number; character: number };
+    newName: string;
+  },
+  documents: DocumentStore,
 ): WorkspaceEdit | null {
   const newName = params.newName;
   if (!IDENTIFIER.test(newName) || RESERVED.has(newName)) {
-    throw new ResponseError(
+    throw new LspError(
       ErrorCodes.InvalidParams,
       `'${newName}' is not a valid Grayscale identifier`,
     );
@@ -73,14 +69,14 @@ export function provideRename(
   if (target.name === newName) return null;
 
   if (scanSymbols(text).some(sym => sym.name === newName)) {
-    throw new ResponseError(
+    throw new LspError(
       ErrorCodes.InvalidParams,
       `'${newName}' is already declared in this file`,
     );
   }
 
   const edits = findWordOccurrences(text, target.name, { skipMemberAccess: true })
-    .map(range => TextEdit.replace(range, newName));
+    .map(range => ({ range, newText: newName }));
 
   if (edits.length === 0) return null;
 

@@ -8,6 +8,10 @@ A Language Server Protocol (LSP) implementation for the [Grayscale programming l
 - **Completion** — keywords, types, builtins, stdlib modules, and in-file symbols
 - **Hover docs** — documentation for all Grayscale keywords, types, and builtins
 - **Go to definition** — jump to variable, `const`, function (`do`/`fn`), `struct`, `enum`, and `alias` declarations within the current file
+- **Document symbols** — outline functions, types, and variables with full block ranges
+- **References** — find every file-local use of a symbol
+- **Rename** — file-local, name-based rename that skips comments, strings, and member accesses
+- **Formatting** — `textDocument/formatting` backed by `gray fmt`
 
 ---
 
@@ -61,6 +65,25 @@ To confirm the server is running: `Cmd+Shift+P` → **"zed: open log"**, search 
 
 Each release also includes `server.js`. Any editor that can launch a language server over stdio can use it: download `server.js` and run `node server.js --stdio`.
 
+### Native binary (`scriptc`)
+
+The server also has a native entry point, `src/native.ts`, which implements the
+small JSON-RPC/LSP surface GrayLS needs directly over stdio. It calls the same
+feature modules as the Node server but avoids `vscode-languageserver`'s
+Node-island boundary, so `scriptc` can compile it fully statically.
+
+```sh
+npm ci
+node node_modules/scriptc/scripts/install-native.mjs   # if npm skipped postinstall
+npm run coverage:native                                # expect 100% static
+npm run build:native                                   # out/grayls
+./out/grayls --stdio
+```
+
+`scriptc` needs `clang` (and `lld` on some platforms). On glibc Linux without
+clang, install it with your package manager or `x pixi use clang`. The resulting
+binary is optional; editors can keep using `node server.js --stdio`.
+
 ---
 
 ## Try It Out
@@ -92,21 +115,46 @@ The `gray` that runs is the first one on your `$PATH`, so diagnostics match that
 
 ---
 
+## How Formatting Works
+
+`gray fmt` rewrites a path in place and has no stdin mode. For a formatting
+request, grayls writes the current buffer to a temporary `.gray` file, runs:
+
+```sh
+gray fmt /tmp/gray-lsp-fmt-XXXX.gray
+```
+
+then reads the file back and returns one full-document `TextEdit`. `gray fmt`
+type-checks first, so formatting fails with the compiler's message when the
+buffer is not valid Grayscale. The server advertises `documentFormattingProvider`;
+editors such as Neovim can reach it through `vim.lsp.buf.format()`.
+
+---
+
 ## Project Structure
 
 ```
 grayls/
   src/
     extension.ts          VS Code extension entry point
-    server.ts             LSP server (stdio transport)
+    server.ts             Node LSP server (vscode-languageserver, stdio)
+    native.ts             Native LSP server (scriptc, stdio JSON-RPC)
+    types.ts              Protocol-neutral shapes shared by both servers
     features/
       diagnostics.ts      gray integration + output parser
+      diagnosticsServer.ts Node-side debounce/publish wiring
       completion.ts       keyword / type / builtin / symbol completion
       hover.ts            hover docs for keywords, types, builtins, symbols
       definition.ts       go-to-definition (single-file)
+      documentSymbols.ts  outline / full block ranges
+      references.ts       file-local references
+      rename.ts           prepare-rename + file-local rename
+      formatting.ts       gray fmt via a temporary file
     utils/
       gray-data.ts        all Grayscale keywords, types, builtins, and docs
       symbols.ts          in-file symbol scanner
+      occurrences.ts      comment/string masking and occurrence scanning
+  test/                   node:test coverage, including the native wire protocol
   zed-extension/          Zed dev extension (registers Grayscale language + grayls)
   package.json
   tsconfig.json

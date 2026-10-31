@@ -1,10 +1,5 @@
-import {
-  CompletionItem,
-  CompletionItemKind,
-  CompletionParams,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { CompletionItem, DocumentStore, TextDocumentLike } from '../types';
+import { CompletionItemKind } from '../types';
 import { KEYWORDS, TYPES, BUILTINS, STDLIB_MODULES, ATTRIBUTES, DOCS } from '../utils/gray-data';
 import { scanSymbols } from '../utils/symbols';
 
@@ -74,15 +69,18 @@ function enclosingCall(prefix: string): string | null {
   return null;
 }
 
-function getLinePrefix(doc: TextDocument, params: CompletionParams): string {
+function getLinePrefix(
+  doc: TextDocumentLike,
+  params: { position: { line: number; character: number } },
+): string {
   const lines = doc.getText().split('\n');
   const line = lines[params.position.line] ?? '';
   return line.slice(0, params.position.character);
 }
 
 export function provideCompletion(
-  params: CompletionParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string }; position: { line: number; character: number } },
+  documents: DocumentStore,
 ): CompletionItem[] {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];

@@ -1,4 +1,4 @@
-import { Position, Location } from 'vscode-languageserver/node';
+import type { Position, Location } from '../types';
 
 export interface EnumMember {
   name: string;

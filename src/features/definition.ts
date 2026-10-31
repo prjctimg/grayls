@@ -1,14 +1,9 @@
-import {
-  DefinitionParams,
-  Location,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentStore, Location } from '../types';
 import { wordAt, scanSymbols, findDeclaration } from '../utils/symbols';
 
 export function provideDefinition(
-  params: DefinitionParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string }; position: { line: number; character: number } },
+  documents: DocumentStore,
 ): Location | null {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return null;

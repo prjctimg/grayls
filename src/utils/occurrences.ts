@@ -1,4 +1,4 @@
-import { Position, Range } from 'vscode-languageserver/node';
+import type { Position, Range } from '../types';
 
 function isWordChar(c: string | undefined): boolean {
   return c !== undefined && /[A-Za-z0-9_]/.test(c);

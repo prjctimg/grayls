@@ -2,14 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as cp from 'child_process';
-import {
-  DocumentFormattingParams,
-  ErrorCodes,
-  ResponseError,
-  TextDocuments,
-  TextEdit,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentStore, TextEdit } from '../types';
+import { ErrorCodes, LspError } from '../types';
 
 function wholeDocumentEdit(text: string, formatted: string): TextEdit[] {
   if (formatted === text) return [];
@@ -35,8 +29,8 @@ function wholeDocumentEdit(text: string, formatted: string): TextEdit[] {
  * one full-document edit.
  */
 export function provideFormatting(
-  params: DocumentFormattingParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string } },
+  documents: DocumentStore,
 ): TextEdit[] {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];
@@ -50,7 +44,7 @@ export function provideFormatting(
   try {
     fs.writeFileSync(tmpFile, text, 'utf8');
   } catch (err) {
-    throw new ResponseError(
+    throw new LspError(
       ErrorCodes.InternalError,
       `Could not create a temporary file for \`gray fmt\`: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -63,7 +57,7 @@ export function provideFormatting(
     });
 
     if (result.error) {
-      throw new ResponseError(
+      throw new LspError(
         ErrorCodes.InternalError,
         `Could not run \`gray fmt\`: ${result.error.message}`,
       );
@@ -71,7 +65,7 @@ export function provideFormatting(
 
     if (result.status !== 0) {
       const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
-      throw new ResponseError(
+      throw new LspError(
         ErrorCodes.InternalError,
         output || '`gray fmt` failed',
       );

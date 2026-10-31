@@ -1,10 +1,4 @@
-import {
-  Hover,
-  HoverParams,
-  MarkupKind,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentStore, Hover } from '../types';
 import { DOCS, MODULE_FUNCTION_DOCS } from '../utils/gray-data';
 import {
   attributeAt,
@@ -14,8 +8,8 @@ import {
   moduleWordAt,
   compositeTypeAt,
   scanSymbols,
-  GraySymbol,
 } from '../utils/symbols';
+import type { GraySymbol } from '../utils/symbols';
 
 // ---------------------------------------------------------------------------
 // Composite type rendering  ([T], [[T]], [T,N], map[K:V])
@@ -120,8 +114,8 @@ function renderVariable(sym: GraySymbol): string {
 // ---------------------------------------------------------------------------
 
 export function provideHover(
-  params: HoverParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string }; position: { line: number; character: number } },
+  documents: DocumentStore,
 ): Hover | null {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return null;
@@ -132,7 +126,7 @@ export function provideHover(
   const composite = compositeTypeAt(text, params.position);
   if (composite) {
     return {
-      contents: { kind: MarkupKind.Markdown, value: renderCompositeType(composite) },
+      contents: { kind: 'markdown', value: renderCompositeType(composite) },
     };
   }
 
@@ -140,7 +134,7 @@ export function provideHover(
   const wildcard = wildcardAt(text, params.position);
   if (wildcard && DOCS[wildcard]) {
     return {
-      contents: { kind: MarkupKind.Markdown, value: DOCS[wildcard] },
+      contents: { kind: 'markdown', value: DOCS[wildcard] },
     };
   }
 
@@ -148,7 +142,7 @@ export function provideHover(
   const attr = attributeAt(text, params.position);
   if (attr && DOCS[attr]) {
     return {
-      contents: { kind: MarkupKind.Markdown, value: DOCS[attr] },
+      contents: { kind: 'markdown', value: DOCS[attr] },
     };
   }
 
@@ -158,14 +152,14 @@ export function provideHover(
     const key = `${modWord.module}.${modWord.fn}`;
     if (MODULE_FUNCTION_DOCS[key]) {
       return {
-        contents: { kind: MarkupKind.Markdown, value: MODULE_FUNCTION_DOCS[key] },
+        contents: { kind: 'markdown', value: MODULE_FUNCTION_DOCS[key] },
       };
     }
     // C interop: any `extern.` member resolves to the imported C header.
     if (modWord.module === 'extern') {
       return {
         contents: {
-          kind: MarkupKind.Markdown,
+          kind: 'markdown',
           value: `**\`extern.${modWord.fn}\`** \u2014 C function or constant, resolved by the C compiler from the imported headers.\n\nA C call result has no Grayscale type of its own. Assign it to a type-annotated variable:\n\n\`\`\`gray\nmut x f64 = extern.sqrt(2.0)\n\`\`\``,
         },
       };
@@ -188,7 +182,7 @@ export function provideHover(
         .join('\n\n');
       return {
         contents: {
-          kind: MarkupKind.Markdown,
+          kind: 'markdown',
           value: `**Enum variant** \`.${variant}\`\n\n${body}\n\nImplicit selector \u2014 the enum type is inferred from context.`,
         },
       };
@@ -201,7 +195,7 @@ export function provideHover(
   // 6. Static docs: keywords, primitive types, builtins, module names
   if (DOCS[word]) {
     return {
-      contents: { kind: MarkupKind.Markdown, value: DOCS[word] },
+      contents: { kind: 'markdown', value: DOCS[word] },
     };
   }
 
@@ -220,6 +214,6 @@ export function provideHover(
   }
 
   return {
-    contents: { kind: MarkupKind.Markdown, value },
+    contents: { kind: 'markdown', value },
   };
 }

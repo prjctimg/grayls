@@ -1,15 +1,10 @@
-import {
-  DocumentSymbol,
-  DocumentSymbolParams,
-  Range,
-  SymbolKind,
-  TextDocuments,
-} from 'vscode-languageserver/node';
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { DocumentSymbol, DocumentStore, Range } from '../types';
+import { SymbolKind } from '../types';
 import { maskNonCode } from '../utils/occurrences';
-import { GraySymbol, scanSymbols } from '../utils/symbols';
+import type { GraySymbol } from '../utils/symbols';
+import { scanSymbols } from '../utils/symbols';
 
-const SYMBOL_KINDS: Record<GraySymbol['kind'], SymbolKind> = {
+const SYMBOL_KINDS: Record<GraySymbol['kind'], number> = {
   variable: SymbolKind.Variable,
   constant: SymbolKind.Constant,
   function: SymbolKind.Function,
@@ -72,8 +67,8 @@ function declarationRange(
 
 /** Document symbols for all declarations in the current file. */
 export function provideDocumentSymbols(
-  params: DocumentSymbolParams,
-  documents: TextDocuments<TextDocument>,
+  params: { textDocument: { uri: string } },
+  documents: DocumentStore,
 ): DocumentSymbol[] {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];
