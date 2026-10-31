@@ -11,15 +11,24 @@
   "engines": {
     "vscode": "^1.80.0"
   },
-  "categories": ["Programming Languages"],
-  "activationEvents": ["onLanguage:gray"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:gray"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
         "id": "gray",
-        "aliases": ["Grayscale", "gray"],
-        "extensions": [".gray"],
+        "aliases": [
+          "Grayscale",
+          "gray"
+        ],
+        "extensions": [
+          ".gray"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -34,6 +43,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node esbuild.js",
     "compile": "tsc -p tsconfig.json",
+    "test": "npm run compile && node --test test/*.test.js",
     "watch": "tsc -watch -p tsconfig.json",
     "package": "vsce package",
     "publish": "vsce publish"
@@ -46,6 +56,7 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.80.0",
     "esbuild": "^0.20.0",
+    "scriptc": "^0.4.6",
     "typescript": "^5.4.0",
     "vscode-languageclient": "^9.0.1"
   }

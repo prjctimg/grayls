@@ -8,6 +8,11 @@ import {
   CompletionParams,
   HoverParams,
   DefinitionParams,
+  DocumentSymbolParams,
+  ReferenceParams,
+  PrepareRenameParams,
+  RenameParams,
+  DocumentFormattingParams,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
@@ -15,6 +20,10 @@ import { registerDiagnostics } from './features/diagnostics';
 import { provideCompletion } from './features/completion';
 import { provideHover } from './features/hover';
 import { provideDefinition } from './features/definition';
+import { provideDocumentSymbols } from './features/documentSymbols';
+import { provideReferences } from './features/references';
+import { prepareRename, provideRename } from './features/rename';
+import { provideFormatting } from './features/formatting';
 
 // Create connection using stdio (works for VS Code IPC and Zed LSP)
 const connection = createConnection(ProposedFeatures.all);
@@ -30,6 +39,10 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
       },
       hoverProvider: true,
       definitionProvider: true,
+      documentSymbolProvider: true,
+      referencesProvider: true,
+      renameProvider: { prepareProvider: true },
+      documentFormattingProvider: true,
     },
     serverInfo: {
       name: 'GrayLS',
@@ -54,6 +67,30 @@ connection.onHover((params: HoverParams) =>
 // Go to definition
 connection.onDefinition((params: DefinitionParams) =>
   provideDefinition(params, documents),
+);
+
+// Document symbols
+connection.onDocumentSymbol((params: DocumentSymbolParams) =>
+  provideDocumentSymbols(params, documents),
+);
+
+// References
+connection.onReferences((params: ReferenceParams) =>
+  provideReferences(params, documents),
+);
+
+// Rename
+connection.onPrepareRename((params: PrepareRenameParams) =>
+  prepareRename(params, documents),
+);
+
+connection.onRenameRequest((params: RenameParams) =>
+  provideRename(params, documents),
+);
+
+// Formatting
+connection.onDocumentFormatting((params: DocumentFormattingParams) =>
+  provideFormatting(params, documents),
 );
 
 // Attach document manager and start listening
