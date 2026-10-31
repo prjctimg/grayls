@@ -81,8 +81,16 @@ npm run build:native                                   # out/grayls
 ```
 
 `scriptc` needs `clang` (and `lld` on some platforms). On glibc Linux without
-clang, install it with your package manager or `x pixi use clang`. The resulting
-binary is optional; editors can keep using `node server.js --stdio`.
+clang, use your package manager or:
+
+```sh
+x pixi use clang lld libclang-cpp
+export PATH="$HOME/.pixi/envs/clang/bin:$PATH"
+export LD_LIBRARY_PATH="$HOME/.pixi/envs/clang/lib:$LD_LIBRARY_PATH"
+```
+
+The resulting binary is optional; editors can keep using
+`node server.js --stdio`.
 
 ---
 
