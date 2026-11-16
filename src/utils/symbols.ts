@@ -892,15 +892,25 @@ function symbolContains(sym: GraySymbol, position: Position): boolean {
 export function resolveSymbolAt(word: string, symbols: GraySymbol[], position: Position): GraySymbol | undefined {
   const candidates = symbols.filter(s => s.name === word);
   if (candidates.length === 0) return undefined;
+
+  // Exact declaration site match (cursor on the symbol name itself)
+  const exact = candidates.find(
+    sym =>
+      sym.line === position.line &&
+      position.character >= sym.char &&
+      position.character <= sym.char + sym.name.length,
+  );
+  if (exact) return exact;
+
   // Prefer symbols whose scope contains the position (locals/params), choosing the latest declaration <= position.
   let best: GraySymbol | undefined;
   for (const sym of candidates) {
     if (sym.scopeEndLine !== undefined && !symbolContains(sym, position)) continue;
+    if (sym.line > position.line) continue;
     if (!best) { best = sym; continue; }
     const bestScoped = best.scopeEndLine !== undefined;
     const symScoped = sym.scopeEndLine !== undefined;
     if (symScoped !== bestScoped) { if (symScoped) best = sym; continue; }
-    // prefer declaration closest before/on position
     if (sym.line > best.line || (sym.line === best.line && sym.char >= best.char)) best = sym;
   }
   return best ?? candidates[0];

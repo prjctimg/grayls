@@ -2,6 +2,7 @@ import type { DocumentStore, InlayHint, Range } from '../types';
 import { InlayHintKind, DiagnosticSeverity } from '../types';
 import { scanSymbols } from '../utils/symbols';
 import { computeDiagnostics } from './diagnostics';
+import { findTestBlocks, getTestStatuses, testStatusIcon } from '../utils/test-status';
 
 function isInsideRange(line: number, character: number, range?: Range): boolean {
   if (!range) return true;
@@ -87,24 +88,54 @@ export function provideInlayHints(
     }
   }
 
-  // Show compiler diagnostics as inlay hints at their positions.
+  // Show compiler diagnostics as inlay hints at end of line (merged per line).
   try {
     const diags = computeDiagnostics(text);
+    const byLine = new Map<number, typeof diags>();
     for (const d of diags) {
       if (d.severity !== DiagnosticSeverity.Error && d.severity !== DiagnosticSeverity.Warning) continue;
       const dl = d.range.start.line;
-      const dc = d.range.end.character ?? d.range.start.character;
-      if (!isInsideRange(dl, dc, params.range)) continue;
-      const prefix = d.severity === DiagnosticSeverity.Error ? '⟵' : '⚠';
-      const code = d.code ? `[${d.code}] ` : '';
+      if (dl < params.range.start.line || dl > params.range.end.line) continue;
+      if (!byLine.has(dl)) byLine.set(dl, []);
+      byLine.get(dl)!.push(d);
+    }
+    for (const [dl, lineDiags] of byLine.entries()) {
+      const sorted = [...lineDiags].sort((a, b) => (a.severity - b.severity) || (a.range.start.character - b.range.start.character));
+      const parts = sorted.map(d => {
+        const icon = d.severity === DiagnosticSeverity.Error ? '' : '';
+        const code = d.code ? `[${d.code}] ` : '';
+        const msg = (d.message || '').replace(/\s+/g, ' ').trim();
+        const short = msg.length > 120 ? msg.slice(0, 117) + '...' : msg;
+        return `${icon} ${code}${short}`;
+      });
       hints.push({
-        position: { line: dl, character: dc },
-        label: ` ${prefix} ${code}${d.message}`,
+        position: { line: dl, character: (lines[dl] ?? '').length },
+        label: `  ${parts.join('  │  ')}`,
         kind: InlayHintKind.Type,
         paddingLeft: true,
       });
     }
   } catch { /* ignore diagnostic computation errors */ }
+
+  // Show test pass/fail status inline next to test blocks.
+  try {
+    const tests = findTestBlocks(text);
+    if (tests.length > 0) {
+      const statuses = getTestStatuses(params.textDocument.uri);
+      for (const t of tests) {
+        if (t.line < params.range.start.line || t.line > params.range.end.line) continue;
+        let state = statuses.get(t.name) ?? statuses.get('*') ?? 'unknown';
+        const icon = testStatusIcon(state);
+        const label = state === 'passed' ? 'passed' : state === 'failed' ? 'failed' : 'not run';
+        hints.push({
+          position: { line: t.line, character: (lines[t.line] ?? '').length },
+          label: `  ${icon} ${label}`,
+          kind: InlayHintKind.Type,
+          paddingLeft: true,
+        });
+      }
+    }
+  } catch { /* ignore test status errors */ }
 
   return hints;
 }
