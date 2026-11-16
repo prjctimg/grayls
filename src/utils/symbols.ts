@@ -647,6 +647,24 @@ export function scanSymbols(text: string): GraySymbol[] {
     }
   }
 
+  // Assign function container/scope to locals declared inside function bodies.
+  const functionScopes = symbols
+    .filter(s => s.kind === 'function' && typeof s.scopeEndLine === 'number')
+    .map(s => ({ name: s.name, start: s.line, end: s.scopeEndLine as number }))
+    .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+
+  for (const sym of symbols) {
+    if (sym.kind === 'function' || sym.kind === 'parameter') continue;
+    if (sym.container && typeof sym.scopeEndLine === 'number') continue;
+    for (const fn of functionScopes) {
+      if (sym.line > fn.start && sym.line <= fn.end) {
+        sym.container = sym.container ?? fn.name;
+        if (typeof sym.scopeEndLine !== 'number') sym.scopeEndLine = fn.end;
+        break;
+      }
+    }
+  }
+
   return symbols;
 }
 
