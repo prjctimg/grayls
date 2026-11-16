@@ -23,16 +23,20 @@ export interface StructField {
 
 export interface GraySymbol {
   name: string;
-  kind: 'variable' | 'constant' | 'function' | 'struct' | 'enum' | 'alias';
+  kind: 'variable' | 'constant' | 'function' | 'struct' | 'enum' | 'alias' | 'parameter';
   line: number;   // 0-indexed
   char: number;   // 0-indexed, start of the name
   declaration: string; // full declaration line text
-  type?: string;           // parsed Grayscale type for mut/const declarations
+  type?: string;           // parsed Grayscale type for mut/const/parameter declarations
   enumMembers?: EnumMember[];
   structFields?: StructField[];
   params?: FuncParam[];
   /** Return signature as written, e.g. `i64` or `(quotient i64, remainder i64)`. */
   returns?: string;
+  /** Name of the enclosing function, when this symbol is local/parameter. */
+  container?: string;
+  /** End line (0-indexed, inclusive) of the enclosing scope, when known. */
+  scopeEndLine?: number;
 }
 
 /**
@@ -199,9 +203,9 @@ function parseParams(list: string): FuncParam[] {
 /**
  * Split a function declaration into its parameter list and return signature.
  */
-function parseSignature(line: string): { params: FuncParam[]; returns?: string } {
+function parseSignature(line: string): { params: FuncParam[]; returns?: string; open: number; close: number } {
   const open = line.indexOf('(');
-  if (open === -1) return { params: [] };
+  if (open === -1) return { params: [], open: -1, close: -1 };
 
   let depth = 0;
   let close = -1;
@@ -209,11 +213,11 @@ function parseSignature(line: string): { params: FuncParam[]; returns?: string }
     if (line[i] === '(') depth++;
     else if (line[i] === ')') { depth--; if (depth === 0) { close = i; break; } }
   }
-  if (close === -1) return { params: [] };
+  if (close === -1) return { params: [], open, close: -1 };
 
   const params = parseParams(line.slice(open + 1, close));
   const arrow = line.indexOf('->', close);
-  if (arrow === -1) return { params };
+  if (arrow === -1) return { params, open, close };
 
   // The return signature ends at the `{` that opens the body. Return types
   // never contain braces, so the first one is always the body.
@@ -221,7 +225,23 @@ function parseSignature(line: string): { params: FuncParam[]; returns?: string }
   const brace = tail.indexOf('{');
   if (brace !== -1) tail = tail.slice(0, brace);
   const returns = tail.trim();
-  return { params, returns: returns || undefined };
+  return { params, returns: returns || undefined, open, close };
+}
+
+function locateParamChars(line: string, params: FuncParam[], open: number, close: number): number[] {
+  if (open < 0 || close < 0) return params.map(() => -1);
+  const segment = line.slice(open + 1, close);
+  const chars: number[] = [];
+  let search = 0;
+  for (const p of params) {
+    const re = new RegExp(`\\b${p.name}\\b`);
+    const m = re.exec(segment.slice(search));
+    if (!m) { chars.push(-1); continue; }
+    const idx = search + m.index;
+    chars.push(open + 1 + idx);
+    search = idx + p.name.length;
+  }
+  return chars;
 }
 
 /**
@@ -540,14 +560,44 @@ export function scanSymbols(text: string): GraySymbol[] {
         });
       } else if ((m = FUNC_PATTERN.exec(line))) {
         const sig = parseSignature(line);
+        const funcName = m[1];
+        // Compute function body/scope end line
+        let scopeEnd = i;
+        {
+          const ml = maskRawStrings(text).split('\n');
+          let depth = 0;
+          let opened = false;
+          for (let li = i; li < ml.length; li++) {
+            for (const c of ml[li]) {
+              if (c === '{') { depth++; opened = true; }
+              else if (c === '}') { depth--; if (opened && depth === 0) { scopeEnd = li; li = ml.length; break; } }
+            }
+          }
+        }
         symbols.push({
-          name: m[1],
+          name: funcName,
           kind: 'function',
           line: i,
-          char: line.indexOf(m[1]),
+          char: line.indexOf(funcName),
           declaration: sourceLines[i].trim(),
           params: sig.params,
           returns: sig.returns,
+          scopeEndLine: scopeEnd,
+        });
+        const paramChars = locateParamChars(line, sig.params, sig.open, sig.close);
+        sig.params.forEach((p, idx) => {
+          const ch = paramChars[idx] ?? -1;
+          if (ch < 0) return;
+          symbols.push({
+            name: p.name,
+            kind: 'parameter',
+            line: i,
+            char: ch,
+            declaration: sourceLines[i].trim(),
+            type: p.type,
+            container: funcName,
+            scopeEndLine: scopeEnd,
+          });
         });
       } else if ((m = MUT_PATTERN.exec(line)) || (m = CONST_VAR_PATTERN.exec(line))) {
         const kind = /^\s*(?:private\s+)?mut\b/.test(line) ? 'variable' : 'constant';
@@ -802,11 +852,44 @@ export function compositeTypeAt(text: string, position: Position): string | null
   return null;
 }
 
+function symbolContains(sym: GraySymbol, position: Position): boolean {
+  if (sym.scopeEndLine === undefined) return true;
+  if (position.line < sym.line) return false;
+  if (position.line > sym.scopeEndLine) return false;
+  return true;
+}
+
 /**
- * Given a word and a set of symbols, find the first declaration location.
+ * Resolve the best matching symbol for `word` at `position`.
+ * Prefers the innermost in-scope declaration (e.g. parameters/locals over globals).
  */
-export function findDeclaration(word: string, symbols: GraySymbol[], uri: string): Location | null {
-  const sym = symbols.find(s => s.name === word);
+export function resolveSymbolAt(word: string, symbols: GraySymbol[], position: Position): GraySymbol | undefined {
+  const candidates = symbols.filter(s => s.name === word);
+  if (candidates.length === 0) return undefined;
+  // Prefer symbols whose scope contains the position (locals/params), choosing the latest declaration <= position.
+  let best: GraySymbol | undefined;
+  for (const sym of candidates) {
+    if (sym.scopeEndLine !== undefined && !symbolContains(sym, position)) continue;
+    if (!best) { best = sym; continue; }
+    const bestScoped = best.scopeEndLine !== undefined;
+    const symScoped = sym.scopeEndLine !== undefined;
+    if (symScoped !== bestScoped) { if (symScoped) best = sym; continue; }
+    // prefer declaration closest before/on position
+    if (sym.line > best.line || (sym.line === best.line && sym.char >= best.char)) best = sym;
+  }
+  return best ?? candidates[0];
+}
+
+/**
+ * Given a word and a set of symbols, find the best declaration location.
+ */
+export function findDeclaration(
+  word: string,
+  symbols: GraySymbol[],
+  uri: string,
+  position?: Position,
+): Location | null {
+  const sym = position ? resolveSymbolAt(word, symbols, position) : symbols.find(s => s.name === word);
   if (!sym) return null;
   return {
     uri,

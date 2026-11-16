@@ -7,7 +7,8 @@ import {
   isMemberAccessAt,
   wordRangeAt,
 } from '../utils/occurrences';
-import { scanSymbols } from '../utils/symbols';
+import { resolveSymbolAt, scanSymbols } from '../utils/symbols';
+import { allIndexedFiles, refreshWorkspaceIndex } from '../utils/workspace';
 
 const RESERVED = new Set([...KEYWORDS, ...TYPES, ...BUILTINS]);
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -15,7 +16,7 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 function symbolAt(
   text: string,
   position: { line: number; character: number },
-): { name: string; range: ReturnType<typeof wordRangeAt> } | null {
+): { name: string; range: ReturnType<typeof wordRangeAt>; kind?: string; container?: string } | null {
   if (!isCodePosition(text, position)) return null;
   if (isMemberAccessAt(text, position)) return null;
 
@@ -26,8 +27,9 @@ function symbolAt(
   const name = line.slice(range.start.character, range.end.character);
   if (!name) return null;
 
-  if (!scanSymbols(text).some(sym => sym.name === name)) return null;
-  return { name, range };
+  const sym = resolveSymbolAt(name, scanSymbols(text), position);
+  if (!sym) return null;
+  return { name, range, kind: sym.kind, container: sym.container };
 }
 
 /** Validate that the cursor is on a symbol that can be renamed. */
@@ -43,7 +45,7 @@ export function prepareRename(
   return { range: target.range, placeholder: target.name };
 }
 
-/** File-local rename of every whole-word occurrence of the symbol. */
+/** Rename symbol occurrences (file-local for locals/params, cross-file for top-level symbols). */
 export function provideRename(
   params: {
     textDocument: { uri: string };
@@ -68,21 +70,37 @@ export function provideRename(
   if (!target || !target.range) return null;
   if (target.name === newName) return null;
 
-  if (scanSymbols(text).some(sym => sym.name === newName)) {
-    throw new LspError(
-      ErrorCodes.InvalidParams,
-      `'${newName}' is already declared in this file`,
-    );
+  const localSyms = scanSymbols(text);
+  if (localSyms.some(sym => sym.name === newName)) {
+    // allow renaming to same symbol identity? but simpler: reject conflicts in file
+    const conflict = resolveSymbolAt(newName, localSyms, params.position);
+    if (conflict) {
+      throw new LspError(
+        ErrorCodes.InvalidParams,
+        `'${newName}' is already declared in this file`,
+      );
+    }
   }
 
-  const edits = findWordOccurrences(text, target.name, { skipMemberAccess: true })
+  const changes: { [uri: string]: { range: any; newText: string }[] } = {};
+  const localEdits = findWordOccurrences(text, target.name, { skipMemberAccess: true })
     .map(range => ({ range, newText: newName }));
+  if (localEdits.length > 0) changes[params.textDocument.uri] = localEdits;
 
-  if (edits.length === 0) return null;
+  const isTopLevel = target.kind !== 'parameter' && target.container === undefined;
+  if (isTopLevel) {
+    try { refreshWorkspaceIndex(); } catch {}
+    for (const file of allIndexedFiles()) {
+      if (file.uri === params.textDocument.uri) continue;
+      if (file.symbols.some(sym => sym.name === newName && sym.kind !== 'parameter')) {
+        throw new LspError(ErrorCodes.InvalidParams, `'${newName}' is already declared in ${file.uri}`);
+      }
+      const edits = findWordOccurrences(file.text, target.name, { skipMemberAccess: true })
+        .map(range => ({ range, newText: newName }));
+      if (edits.length > 0) changes[file.uri] = edits;
+    }
+  }
 
-  return {
-    changes: {
-      [params.textDocument.uri]: edits,
-    },
-  };
+  if (Object.keys(changes).length === 0) return null;
+  return { changes };
 }

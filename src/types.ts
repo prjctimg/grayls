@@ -63,6 +63,69 @@ export interface MarkupContent {
 
 export interface Hover {
   contents: MarkupContent;
+  range?: Range;
+}
+
+export interface ParameterInformation {
+  label: string | [number, number];
+  documentation?: string | MarkupContent;
+}
+
+export interface SignatureInformation {
+  label: string;
+  documentation?: string | MarkupContent;
+  parameters?: ParameterInformation[];
+}
+
+export interface SignatureHelp {
+  signatures: SignatureInformation[];
+  activeSignature?: number;
+  activeParameter?: number;
+}
+
+export interface InlayHint {
+  position: Position;
+  label: string;
+  kind?: number; // 1 Type, 2 Parameter
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+}
+
+export interface SemanticTokensLegend {
+  tokenTypes: string[];
+  tokenModifiers: string[];
+}
+
+export interface SemanticTokens {
+  resultId?: string;
+  data: number[];
+}
+
+export interface CodeActionContext {
+  diagnostics: Diagnostic[];
+  only?: string[];
+}
+
+export interface Command {
+  title: string;
+  command: string;
+  arguments?: any[];
+}
+
+export interface CodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: Diagnostic[];
+  isPreferred?: boolean;
+  edit?: WorkspaceEdit;
+  command?: Command;
+}
+
+export interface SymbolInformation {
+  name: string;
+  kind: number;
+  location: Location;
+  containerName?: string;
 }
 
 export interface DocumentSymbol {
@@ -96,6 +159,20 @@ export const SymbolKind = {
   Enum: 10,
   Struct: 23,
   TypeParameter: 26,
+  Parameter: 0, // not standard standalone; mapped to Variable where needed
+};
+
+/** LSP `InlayHintKind` values. */
+export const InlayHintKind = {
+  Type: 1,
+  Parameter: 2,
+};
+
+/** LSP `CodeActionKind` values used by this server. */
+export const CodeActionKind = {
+  QuickFix: 'quickfix',
+  Refactor: 'refactor',
+  Source: 'source',
 };
 
 /** LSP `DiagnosticSeverity` values used by this server. */
@@ -109,6 +186,7 @@ export const ErrorCodes = {
   InvalidParams: -32602,
   InternalError: -32603,
   MethodNotFound: -32601,
+  RequestCancelled: -32800,
 };
 
 export class LspError extends Error {

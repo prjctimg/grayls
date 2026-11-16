@@ -11,6 +11,7 @@ const SYMBOL_KINDS: Record<GraySymbol['kind'], number> = {
   struct: SymbolKind.Struct,
   enum: SymbolKind.Enum,
   alias: SymbolKind.TypeParameter,
+  parameter: SymbolKind.Variable,
 };
 
 function lastNonSpace(line: string): number {
@@ -77,7 +78,10 @@ export function provideDocumentSymbols(
   const lines = text.split('\n');
   const maskedLines = maskNonCode(text).split('\n');
 
-  return scanSymbols(text).map(sym => ({
+  // Exclude parameter pseudo-symbols from the outline to avoid noise.
+  return scanSymbols(text)
+    .filter(sym => sym.kind !== 'parameter')
+    .map(sym => ({
     name: sym.name,
     kind: SYMBOL_KINDS[sym.kind],
     detail: sym.declaration,

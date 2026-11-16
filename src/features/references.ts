@@ -7,8 +7,9 @@ import {
   wordRangeAt,
 } from '../utils/occurrences';
 import { scanSymbols } from '../utils/symbols';
+import { allIndexedFiles, refreshWorkspaceIndex } from '../utils/workspace';
 
-/** All in-file references to the symbol under the cursor. */
+/** References to the symbol under the cursor (file-local by default; can include workspace files). */
 export function provideReferences(
   params: {
     textDocument: { uri: string };
@@ -31,17 +32,41 @@ export function provideReferences(
   const word = line.slice(range.start.character, range.end.character);
   if (!word) return [];
 
-  const declarations = scanSymbols(text)
-    .filter(sym => sym.name === word)
-    .map(sym => ({
-      start: { line: sym.line, character: sym.char },
-      end: { line: sym.line, character: sym.char + sym.name.length },
-    }));
-
-  if (declarations.length === 0) return [];
+  const localDecls = scanSymbols(text).filter(sym => sym.name === word);
+  if (localDecls.length === 0) return [];
 
   const includeDeclaration = params.context?.includeDeclaration ?? true;
-  return findWordOccurrences(text, word, { skipMemberAccess: true })
-    .filter(r => includeDeclaration || !declarations.some(d => rangeEquals(d, r)))
-    .map(r => ({ uri: params.textDocument.uri, range: r }));
+  const locations: Location[] = [];
+
+  // current file
+  const declRanges = localDecls.map(sym => ({
+    start: { line: sym.line, character: sym.char },
+    end: { line: sym.line, character: sym.char + sym.name.length },
+  }));
+  for (const r of findWordOccurrences(text, word, { skipMemberAccess: true })) {
+    if (includeDeclaration || !declRanges.some(d => rangeEquals(d, r))) {
+      locations.push({ uri: params.textDocument.uri, range: r });
+    }
+  }
+
+  // cross-file: if this looks like a top-level file symbol, search workspace
+  const isTopLevel = localDecls.some(s => s.kind !== 'parameter' && s.container === undefined);
+  if (isTopLevel) {
+    try { refreshWorkspaceIndex(); } catch {}
+    for (const file of allIndexedFiles()) {
+      if (file.uri === params.textDocument.uri) continue;
+      const otherDecls = file.symbols.filter(sym => sym.name === word && sym.kind !== 'parameter');
+      const otherDeclRanges = otherDecls.map(sym => ({
+        start: { line: sym.line, character: sym.char },
+        end: { line: sym.line, character: sym.char + sym.name.length },
+      }));
+      for (const r of findWordOccurrences(file.text, word, { skipMemberAccess: true })) {
+        if (includeDeclaration || !otherDeclRanges.some(d => rangeEquals(d, r))) {
+          locations.push({ uri: file.uri, range: r });
+        }
+      }
+    }
+  }
+
+  return locations;
 }

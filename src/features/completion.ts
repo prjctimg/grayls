@@ -1,7 +1,7 @@
 import type { CompletionItem, DocumentStore, TextDocumentLike } from '../types';
 import { CompletionItemKind } from '../types';
-import { KEYWORDS, TYPES, BUILTINS, STDLIB_MODULES, ATTRIBUTES, DOCS } from '../utils/gray-data';
-import { scanSymbols } from '../utils/symbols';
+import { KEYWORDS, TYPES, BUILTINS, STDLIB_MODULES, ATTRIBUTES, DOCS, MODULE_FUNCTION_DOCS } from '../utils/gray-data';
+import { resolveSymbolAt, scanSymbols } from '../utils/symbols';
 
 // Pre-built static completion lists (created once)
 const KEYWORD_ITEMS: CompletionItem[] = KEYWORDS.map(k => ({
@@ -49,6 +49,21 @@ const STATIC_ITEMS: CompletionItem[] = [
   ...BUILTIN_ITEMS,
 ];
 
+const MODULE_MEMBER_ITEMS = new Map<string, CompletionItem[]>();
+for (const [key, doc] of Object.entries(MODULE_FUNCTION_DOCS)) {
+  const dot = key.indexOf('.');
+  if (dot <= 0) continue;
+  const mod = key.slice(0, dot);
+  const name = key.slice(dot + 1);
+  if (!MODULE_MEMBER_ITEMS.has(mod)) MODULE_MEMBER_ITEMS.set(mod, []);
+  MODULE_MEMBER_ITEMS.get(mod)!.push({
+    label: name,
+    kind: CompletionItemKind.Function,
+    detail: `${mod}.${name}`,
+    documentation: doc,
+  });
+}
+
 /**
  * Name of the function whose argument list the cursor sits in, or null.
  * Scans back for the innermost unclosed `(`.
@@ -78,6 +93,23 @@ function getLinePrefix(
   return line.slice(0, params.position.character);
 }
 
+function memberAccessPrefix(prefix: string): string | null {
+  const m = prefix.match(/([A-Za-z_][A-Za-z0-9_]*)\.\w*$/);
+  if (!m) return null;
+  // bare implicit selector `.X` is handled separately
+  if (/(?:^|[\s({\[,:=!<>+\-*/])\.\w*$/.test(prefix)) return null;
+  return m[1];
+}
+
+function normalizeTypeName(type: string | undefined): string | null {
+  if (!type) return null;
+  let t = type.trim();
+  t = t.replace(/^\^+/, '').trim();
+  if (!t || t.startsWith('[') || t.startsWith('map[')) return null;
+  const m = t.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+  return m ? m[1] : null;
+}
+
 export function provideCompletion(
   params: { textDocument: { uri: string }; position: { line: number; character: number } },
   documents: DocumentStore,
@@ -98,12 +130,36 @@ export function provideCompletion(
     return ATTRIBUTE_ITEMS;
   }
 
-  // Context: after `import @module using` → still show modules (already picked)
-  // For now, just return static items. Module-member completion would need
-  // a per-module symbol table which is a follow-up.
-
   const text = doc.getText();
   const fileSymbols = scanSymbols(text);
+
+  // Context: module or struct member access like `arrays.` / `point.`
+  const base = memberAccessPrefix(prefix);
+  if (base) {
+    const moduleItems = MODULE_MEMBER_ITEMS.get(base);
+    if (moduleItems && moduleItems.length > 0) {
+      return moduleItems;
+    }
+
+    const baseSym = resolveSymbolAt(base, fileSymbols, params.position);
+    const typeName = normalizeTypeName(baseSym?.type);
+    if (typeName) {
+      let structSym = fileSymbols.find(s => s.kind === 'struct' && s.name === typeName);
+      if (!structSym) {
+        const alias = fileSymbols.find(s => s.kind === 'alias' && s.name === typeName);
+        const aliased = normalizeTypeName(alias?.type);
+        if (aliased) structSym = fileSymbols.find(s => s.kind === 'struct' && s.name === aliased);
+      }
+      if (structSym?.structFields?.length) {
+        return structSym.structFields.map(f => ({
+          label: f.name,
+          kind: CompletionItemKind.Field,
+          detail: `${structSym!.name}.${f.name} ${f.type}${f.default !== undefined ? ` = ${f.default}` : ''}`,
+        }));
+      }
+    }
+    // Unknown member access base: fall through to general completions below.
+  }
 
   // Context: a bare `.` not preceded by an identifier → implicit enum selector.
   // Offer every variant declared in the file; the compiler resolves the type.
@@ -126,7 +182,9 @@ export function provideCompletion(
     if (variantItems.length > 0) return variantItems;
   }
 
-  const symbolItems: CompletionItem[] = fileSymbols.map(sym => ({
+  const symbolItems: CompletionItem[] = fileSymbols
+    .filter(sym => sym.kind !== 'parameter')
+    .map(sym => ({
     label: sym.name,
     kind: sym.kind === 'function'
       ? CompletionItemKind.Function

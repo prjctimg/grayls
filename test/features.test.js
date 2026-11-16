@@ -174,3 +174,100 @@ test('rename rejects invalid, reserved, and already-declared names', () => {
   assert.throws(() => rename('mut'));
   assert.throws(() => rename('X'));
 });
+
+const { provideHover } = require('../out/features/hover');
+const { provideDefinition } = require('../out/features/definition');
+const { provideSignatureHelp } = require('../out/features/signatureHelp');
+const { provideInlayHints } = require('../out/features/inlayHints');
+const { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } = require('../out/features/semanticTokens');
+const { provideCodeActions } = require('../out/features/codeActions');
+const { provideWorkspaceSymbols } = require('../out/features/workspaceSymbols');
+const { setWorkspaceRoots, refreshWorkspaceIndex } = require('../out/utils/workspace');
+
+test('hover resolves variables and parameters', () => {
+  const text = [
+    'do add(a i64, b i64) -> i64 {',
+    '    mut total i64 = a + b',
+    '    return total',
+    '}',
+  ].join('\n');
+  const documents = fakeDocuments(text);
+  const paramHover = provideHover({ textDocument: { uri: URI }, position: { line: 1, character: 20 } }, documents);
+  assert.ok(paramHover);
+  assert.match(paramHover.contents.value, /Parameter/);
+  assert.match(paramHover.contents.value, /`a`/);
+  const varHover = provideHover({ textDocument: { uri: URI }, position: { line: 2, character: 12 } }, documents);
+  assert.ok(varHover);
+  assert.match(varHover.contents.value, /Variable/);
+  assert.match(varHover.contents.value, /`total`/);
+});
+
+test('definition resolves parameters', () => {
+  const text = [
+    'do add(a i64, b i64) -> i64 {',
+    '    return a + b',
+    '}',
+  ].join('\n');
+  const documents = fakeDocuments(text);
+  const loc = provideDefinition({ textDocument: { uri: URI }, position: { line: 1, character: 11 } }, documents);
+  assert.ok(loc);
+  assert.equal(loc.range.start.line, 0);
+});
+
+test('signature help returns user function signatures', () => {
+  const text = [
+    'do add(a i64, b i64) -> i64 {',
+    '    return a + b',
+    '}',
+    'do main() {',
+    '    add(1, 2)',
+    '}',
+  ].join('\n');
+  const documents = fakeDocuments(text);
+  const help = provideSignatureHelp({ textDocument: { uri: URI }, position: { line: 4, character: 10 } }, documents);
+  assert.ok(help);
+  assert.equal(help.signatures.length, 1);
+  assert.match(help.signatures[0].label, /add/);
+  assert.ok(help.signatures[0].parameters.length >= 2);
+});
+
+test('inlay hints provide parameter names for calls', () => {
+  const text = [
+    'do add(a i64, b i64) -> i64 {',
+    '    return a + b',
+    '}',
+    'do main() {',
+    '    add(1, 2)',
+    '}',
+  ].join('\n');
+  const documents = fakeDocuments(text);
+  const hints = provideInlayHints({ textDocument: { uri: URI }, range: { start: { line: 0, character: 0 }, end: { line: 10, character: 0 } } }, documents);
+  assert.ok(hints.length >= 2);
+  assert.ok(hints.some(h => String(h.label).includes('a')));
+});
+
+test('semantic tokens return legend-compatible data', () => {
+  const text = [
+    'do add(a i64, b i64) -> i64 {',
+    '    mut total i64 = a + b',
+    '    return total',
+    '}',
+  ].join('\n');
+  const documents = fakeDocuments(text);
+  const tokens = provideSemanticTokens({ textDocument: { uri: URI } }, documents);
+  assert.ok(SEMANTIC_TOKENS_LEGEND.tokenTypes.length > 0);
+  assert.ok(Array.isArray(tokens.data));
+  assert.equal(tokens.data.length % 5, 0);
+  assert.ok(tokens.data.length > 0);
+});
+
+test('code actions and workspace symbols are callable', () => {
+  const text = 'do main() { mut x i64 = 1 }';
+  const documents = fakeDocuments(text);
+  const actions = provideCodeActions({ textDocument: { uri: URI }, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, context: { diagnostics: [] } }, documents);
+  assert.ok(Array.isArray(actions));
+  setWorkspaceRoots([]);
+  refreshWorkspaceIndex();
+  const ws = provideWorkspaceSymbols({ query: '' }, documents);
+  assert.ok(Array.isArray(ws));
+});

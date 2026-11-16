@@ -18,6 +18,12 @@ import { provideFormatting } from './features/formatting';
 import { provideHover } from './features/hover';
 import { provideReferences } from './features/references';
 import { prepareRename, provideRename } from './features/rename';
+import { provideSignatureHelp } from './features/signatureHelp';
+import { provideInlayHints } from './features/inlayHints';
+import { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } from './features/semanticTokens';
+import { provideCodeActions } from './features/codeActions';
+import { provideWorkspaceSymbols } from './features/workspaceSymbols';
+import { setWorkspaceRoots, refreshWorkspaceIndex, upsertIndexedDocument } from './utils/workspace';
 
 interface NativeDocument {
   uri: string;
@@ -79,6 +85,12 @@ function readMessage(): string | null {
   }
 }
 
+function openDocsMap(): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const [uri, d] of documents.entries()) m.set(uri, d.text);
+  return m;
+}
+
 function publishDiagnostics(uri: string): void {
   const doc = documents.get(uri);
   if (!doc) return;
@@ -89,7 +101,15 @@ function publishDiagnostics(uri: string): void {
   });
 }
 
-function initialize(): unknown {
+function initialize(params: any): unknown {
+  const roots: string[] = [];
+  if (params?.rootUri) roots.push(params.rootUri);
+  if (params?.rootPath) roots.push(params.rootPath);
+  if (Array.isArray(params?.workspaceFolders)) {
+    for (const f of params.workspaceFolders) if (f?.uri) roots.push(f.uri);
+  }
+  setWorkspaceRoots(roots);
+  try { refreshWorkspaceIndex(openDocsMap()); } catch { /* ignore */ }
   return {
     capabilities: {
       // Full sync keeps the native wire protocol small; Neovim respects it.
@@ -104,6 +124,11 @@ function initialize(): unknown {
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
       documentFormattingProvider: true,
+      signatureHelpProvider: { triggerCharacters: ['(', ','] },
+      inlayHintProvider: true,
+      semanticTokensProvider: { legend: SEMANTIC_TOKENS_LEGEND, full: true },
+      codeActionProvider: true,
+      workspaceSymbolProvider: true,
     },
     serverInfo: {
       name: 'GrayLS',
@@ -115,7 +140,7 @@ function initialize(): unknown {
 function dispatch(method: string, params: any): unknown {
   switch (method) {
     case 'initialize':
-      return initialize();
+      return initialize(params);
     case 'shutdown':
       return null;
     case 'textDocument/completion':
@@ -134,6 +159,22 @@ function dispatch(method: string, params: any): unknown {
       return provideRename(params, store);
     case 'textDocument/formatting':
       return provideFormatting(params, store);
+    case 'textDocument/signatureHelp':
+      return provideSignatureHelp(params, store);
+    case 'textDocument/inlayHint':
+      return provideInlayHints(params, store);
+    case 'textDocument/semanticTokens/full':
+      return provideSemanticTokens(params, store);
+    case 'textDocument/codeAction':
+      return provideCodeActions(params, store);
+    case 'workspace/symbol':
+      return provideWorkspaceSymbols(params, store);
+    case 'workspace/didChangeWatchedFiles':
+    case 'textDocument/didChangeConfiguration':
+      try { refreshWorkspaceIndex(openDocsMap()); } catch {}
+      return null;
+    case '$/cancelRequest':
+      return null;
     default:
       throw new LspError(ErrorCodes.MethodNotFound, `Unsupported method: ${method}`);
   }
@@ -146,6 +187,7 @@ function handleNotification(method: string, params: any): void {
     case 'textDocument/didOpen': {
       const doc = params.textDocument;
       documents.set(doc.uri, { uri: doc.uri, version: doc.version, text: doc.text });
+      try { upsertIndexedDocument(doc.uri, doc.text); } catch {}
       publishDiagnostics(doc.uri);
       return;
     }
@@ -158,6 +200,7 @@ function handleNotification(method: string, params: any): void {
       // Full sync: the last change contains the whole document.
       doc.text = changes[changes.length - 1].text;
       doc.version = params.textDocument.version;
+      try { upsertIndexedDocument(uri, doc.text); } catch {}
       publishDiagnostics(uri);
       return;
     }
@@ -167,6 +210,7 @@ function handleNotification(method: string, params: any): void {
         const doc = documents.get(uri);
         if (doc) doc.text = params.text;
       }
+      try { upsertIndexedDocument(uri, documents.get(uri)?.text ?? ''); refreshWorkspaceIndex(openDocsMap()); } catch {}
       publishDiagnostics(uri);
       return;
     }
@@ -189,6 +233,29 @@ function handleNotification(method: string, params: any): void {
   }
 }
 
+function safeRequestResult(method: string, err: unknown): unknown {
+  if (err instanceof LspError) throw err;
+  switch (method) {
+    case 'textDocument/completion':
+    case 'textDocument/semanticTokens/full':
+    case 'textDocument/inlayHint':
+    case 'textDocument/documentSymbol':
+    case 'textDocument/codeAction':
+    case 'workspace/symbol':
+    case 'textDocument/references':
+      return [];
+    case 'textDocument/hover':
+    case 'textDocument/definition':
+    case 'textDocument/prepareRename':
+    case 'textDocument/rename':
+    case 'textDocument/formatting':
+    case 'textDocument/signatureHelp':
+      return null;
+    default:
+      throw err;
+  }
+}
+
 function handle(message: RpcMessage): void {
   const method = message.method;
   if (typeof method !== 'string') return;
@@ -202,13 +269,20 @@ function handle(message: RpcMessage): void {
     const result = dispatch(method, message.params);
     send({ jsonrpc: '2.0', id: message.id, result: result === undefined ? null : result });
   } catch (err) {
-    const code = err instanceof LspError ? err.code : ErrorCodes.InternalError;
-    const text = err instanceof Error ? err.message : String(err);
-    send({
-      jsonrpc: '2.0',
-      id: message.id,
-      error: { code, message: text },
-    });
+    let fallback: unknown;
+    try {
+      fallback = safeRequestResult(method, err);
+    } catch (e) {
+      const code = e instanceof LspError ? e.code : ErrorCodes.InternalError;
+      const text = e instanceof Error ? e.message : String(e);
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: { code, message: text },
+      });
+      return;
+    }
+    send({ jsonrpc: '2.0', id: message.id, result: fallback as any });
   }
 }
 

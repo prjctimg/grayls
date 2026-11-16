@@ -7,6 +7,7 @@ import {
   wordAt,
   moduleWordAt,
   compositeTypeAt,
+  resolveSymbolAt,
   scanSymbols,
 } from '../utils/symbols';
 import type { GraySymbol } from '../utils/symbols';
@@ -104,9 +105,13 @@ function renderFunction(sym: GraySymbol): string {
 }
 
 function renderVariable(sym: GraySymbol): string {
-  const kindLabel = sym.kind === 'constant' ? 'Constant' : 'Variable';
+  const kindLabel =
+    sym.kind === 'constant' ? 'Constant' :
+    sym.kind === 'parameter' ? 'Parameter' :
+    'Variable';
   const typeInfo  = sym.type ? ` \`${sym.type}\`` : '';
-  return `**${kindLabel}**${typeInfo} \`${sym.name}\`\n\n\`\`\`gray\n${sym.declaration}\n\`\`\``;
+  const container = sym.container ? ` in \`${sym.container}\`` : '';
+  return `**${kindLabel}**${typeInfo} \`${sym.name}\`${container}\n\n\`\`\`gray\n${sym.declaration}\n\`\`\``;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,10 +122,11 @@ export function provideHover(
   params: { textDocument: { uri: string }; position: { line: number; character: number } },
   documents: DocumentStore,
 ): Hover | null {
-  const doc = documents.get(params.textDocument.uri);
-  if (!doc) return null;
+  try {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc) return null;
 
-  const text = doc.getText();
+    const text = doc.getText();
 
   // 1. Composite type: [T], [[T]], [T,N], map[K:V]
   const composite = compositeTypeAt(text, params.position);
@@ -201,7 +207,7 @@ export function provideHover(
 
   // 7. User-defined symbols
   const symbols = scanSymbols(text);
-  const sym = symbols.find(s => s.name === word);
+  const sym = resolveSymbolAt(word, symbols, params.position);
   if (!sym) return null;
 
   let value: string;
@@ -216,4 +222,7 @@ export function provideHover(
   return {
     contents: { kind: 'markdown', value },
   };
+  } catch {
+    return null;
+  }
 }

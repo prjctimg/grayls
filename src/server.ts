@@ -13,6 +13,11 @@ import {
   PrepareRenameParams,
   RenameParams,
   DocumentFormattingParams,
+  SignatureHelpParams,
+  InlayHintParams,
+  SemanticTokensParams,
+  CodeActionParams,
+  WorkspaceSymbolParams,
   ResponseError,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -26,6 +31,12 @@ import { provideDocumentSymbols } from './features/documentSymbols';
 import { provideReferences } from './features/references';
 import { prepareRename, provideRename } from './features/rename';
 import { provideFormatting } from './features/formatting';
+import { provideSignatureHelp } from './features/signatureHelp';
+import { provideInlayHints } from './features/inlayHints';
+import { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } from './features/semanticTokens';
+import { provideCodeActions } from './features/codeActions';
+import { provideWorkspaceSymbols } from './features/workspaceSymbols';
+import { refreshWorkspaceIndex, setWorkspaceRoots, upsertIndexedDocument } from './utils/workspace';
 
 // Create connection using stdio (works for VS Code IPC and Zed LSP)
 const connection = createConnection(ProposedFeatures.all);
@@ -44,7 +55,33 @@ function withResponseError<T>(fn: () => T): T {
   }
 }
 
-connection.onInitialize((_params: InitializeParams): InitializeResult => {
+function safe<T>(fn: () => T, fallback: T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof LspError) {
+      throw new ResponseError(err.code, err.message);
+    }
+    return fallback;
+  }
+}
+
+function syncWorkspaceIndex(): void {
+  const open = new Map<string, string>();
+  for (const d of documents.all()) open.set(d.uri, d.getText());
+  try { refreshWorkspaceIndex(open); } catch { /* ignore */ }
+}
+
+connection.onInitialize((params: InitializeParams): InitializeResult => {
+  const roots: string[] = [];
+  if (params.rootUri) roots.push(params.rootUri);
+  if (params.rootPath) roots.push(params.rootPath);
+  if (Array.isArray(params.workspaceFolders)) {
+    for (const f of params.workspaceFolders) if (f?.uri) roots.push(f.uri);
+  }
+  setWorkspaceRoots(roots);
+  syncWorkspaceIndex();
+
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -58,6 +95,11 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
       documentFormattingProvider: true,
+      signatureHelpProvider: { triggerCharacters: ['(', ','] },
+      inlayHintProvider: true,
+      semanticTokensProvider: { legend: SEMANTIC_TOKENS_LEGEND as any, full: true },
+      codeActionProvider: true,
+      workspaceSymbolProvider: true,
     },
     serverInfo: {
       name: 'GrayLS',
@@ -69,36 +111,38 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
 // Register diagnostics (runs gray check on open/save/change)
 registerDiagnostics(connection, documents);
 
+documents.onDidOpen(e => { try { upsertIndexedDocument(e.document.uri, e.document.getText()); } catch {} });
+documents.onDidChangeContent(e => { try { upsertIndexedDocument(e.document.uri, e.document.getText()); } catch {} });
+documents.onDidSave(e => { try { upsertIndexedDocument(e.document.uri, e.document.getText()); syncWorkspaceIndex(); } catch {} });
+
 // Completion
 connection.onCompletion((params: CompletionParams) =>
-  // The protocol-neutral CompletionItem shape is structurally compatible;
-  // `kind` is a plain number rather than the vscode enum.
-  provideCompletion(params, documents) as never,
+  safe(() => provideCompletion(params, documents) as never, [] as never),
 );
 
 // Hover
 connection.onHover((params: HoverParams) =>
-  provideHover(params, documents) as never,
+  safe(() => provideHover(params, documents) as never, null as never),
 );
 
 // Go to definition
 connection.onDefinition((params: DefinitionParams) =>
-  provideDefinition(params, documents),
+  safe(() => provideDefinition(params, documents), null),
 );
 
 // Document symbols
 connection.onDocumentSymbol((params: DocumentSymbolParams) =>
-  provideDocumentSymbols(params, documents) as never,
+  safe(() => provideDocumentSymbols(params, documents) as never, [] as never),
 );
 
 // References
 connection.onReferences((params: ReferenceParams) =>
-  provideReferences(params, documents),
+  safe(() => provideReferences(params, documents), []),
 );
 
 // Rename
 connection.onPrepareRename((params: PrepareRenameParams) =>
-  prepareRename(params, documents),
+  safe(() => prepareRename(params, documents), null),
 );
 
 connection.onRenameRequest((params: RenameParams) =>
@@ -109,6 +153,33 @@ connection.onRenameRequest((params: RenameParams) =>
 connection.onDocumentFormatting((params: DocumentFormattingParams) =>
   withResponseError(() => provideFormatting(params, documents)),
 );
+
+// Signature help
+connection.onSignatureHelp((params: SignatureHelpParams) =>
+  safe(() => provideSignatureHelp(params as any, documents) as never, null as never),
+);
+
+// Inlay hints
+connection.languages.inlayHint.on((params: InlayHintParams) =>
+  safe(() => provideInlayHints(params as any, documents) as never, [] as never),
+);
+
+// Semantic tokens
+connection.languages.semanticTokens.on((params: SemanticTokensParams) =>
+  safe(() => provideSemanticTokens(params as any, documents) as never, { data: [] } as never),
+);
+
+// Code actions
+connection.onCodeAction((params: CodeActionParams) =>
+  safe(() => provideCodeActions(params as any, documents) as never, [] as never),
+);
+
+// Workspace symbols
+connection.onWorkspaceSymbol((params: WorkspaceSymbolParams) =>
+  safe(() => provideWorkspaceSymbols(params as any, documents) as never, [] as never),
+);
+
+connection.onDidChangeWatchedFiles(() => syncWorkspaceIndex());
 
 // Attach document manager and start listening
 documents.listen(connection);
