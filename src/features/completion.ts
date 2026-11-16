@@ -110,6 +110,41 @@ function normalizeTypeName(type: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
+function importedModules(text: string): Set<string> {
+  const set = new Set<string>();
+  const re = /^\s*import\s+(?:and\s+use\s+)?(.+)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const modRe = /@([A-Za-z_][A-Za-z0-9_]*)/g;
+    let mm: RegExpExecArray | null;
+    while ((mm = modRe.exec(m[1])) !== null) set.add(mm[1]);
+  }
+  return set;
+}
+
+function importInsertEdit(text: string, moduleName: string): { range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string } {
+  const lines = text.split('\n');
+  let insertLine = 0;
+  // place after leading comments/blank lines and existing import block
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === '' || t.startsWith('//')) { insertLine = i + 1; continue; }
+    if (/^import\b/.test(t)) { insertLine = i + 1; continue; }
+    break;
+  }
+  return {
+    range: { start: { line: insertLine, character: 0 }, end: { line: insertLine, character: 0 } },
+    newText: `import @${moduleName}\n`,
+  };
+}
+
+function withAutoImport(items: CompletionItem[], text: string, moduleName: string): CompletionItem[] {
+  const imported = importedModules(text);
+  if (imported.has(moduleName)) return items;
+  const edit = importInsertEdit(text, moduleName);
+  return items.map(it => ({ ...it, additionalTextEdits: [edit], detail: `${it.detail ?? moduleName} (auto-import @${moduleName})` }));
+}
+
 export function provideCompletion(
   params: { textDocument: { uri: string }; position: { line: number; character: number } },
   documents: DocumentStore,
@@ -138,7 +173,7 @@ export function provideCompletion(
   if (base) {
     const moduleItems = MODULE_MEMBER_ITEMS.get(base);
     if (moduleItems && moduleItems.length > 0) {
-      return moduleItems;
+      return withAutoImport(moduleItems, text, base);
     }
 
     const baseSym = resolveSymbolAt(base, fileSymbols, params.position);

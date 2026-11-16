@@ -1,6 +1,7 @@
 import type { DocumentStore, InlayHint, Range } from '../types';
-import { InlayHintKind } from '../types';
+import { InlayHintKind, DiagnosticSeverity } from '../types';
 import { scanSymbols } from '../utils/symbols';
+import { computeDiagnostics } from './diagnostics';
 
 function isInsideRange(line: number, character: number, range?: Range): boolean {
   if (!range) return true;
@@ -85,5 +86,25 @@ export function provideInlayHints(
       }
     }
   }
+
+  // Show compiler diagnostics as inlay hints at their positions.
+  try {
+    const diags = computeDiagnostics(text);
+    for (const d of diags) {
+      if (d.severity !== DiagnosticSeverity.Error && d.severity !== DiagnosticSeverity.Warning) continue;
+      const dl = d.range.start.line;
+      const dc = d.range.end.character ?? d.range.start.character;
+      if (!isInsideRange(dl, dc, params.range)) continue;
+      const prefix = d.severity === DiagnosticSeverity.Error ? '⟵' : '⚠';
+      const code = d.code ? `[${d.code}] ` : '';
+      hints.push({
+        position: { line: dl, character: dc },
+        label: ` ${prefix} ${code}${d.message}`,
+        kind: InlayHintKind.Type,
+        paddingLeft: true,
+      });
+    }
+  } catch { /* ignore diagnostic computation errors */ }
+
   return hints;
 }

@@ -602,29 +602,37 @@ export function scanSymbols(text: string): GraySymbol[] {
       } else if ((m = MUT_PATTERN.exec(line)) || (m = CONST_VAR_PATTERN.exec(line))) {
         const kind = /^\s*(?:private\s+)?mut\b/.test(line) ? 'variable' : 'constant';
         const declared = declaredNames(line.slice(m[0].length));
+        let searchFrom = m[0].length;
         for (const entry of declared) {
+          const ch = line.indexOf(entry.name, searchFrom);
+          if (ch >= 0) searchFrom = ch + entry.name.length;
           symbols.push({
             name: entry.name,
             kind,
             line: i,
-            char: line.indexOf(entry.name, m[0].length),
+            char: ch >= 0 ? ch : line.indexOf(entry.name),
             declaration: sourceLines[i].trim(),
-            type: declared.length === 1 ? extractType(line) : entry.type,
+            type: entry.type ?? (declared.length === 1 ? extractType(line) : undefined),
           });
         }
       } else if (!fieldRegion.has(i) && (m = BARE_VAR_PATTERN.exec(line))) {
-        const names = m[1].split(',').map(s => s.trim()).filter(Boolean);
-        if (!NON_DECL_HEADS.has(names[0])) {
-          const type = extractTypeAfter(line.slice(line.indexOf(m[1]) + m[1].length));
-          for (const name of names) {
-            symbols.push({
-              name,
-              kind: 'variable',
-              line: i,
-              char: line.indexOf(name),
-              declaration: sourceLines[i].trim(),
-              type,
-            });
+        const headNames = m[1].split(',').map(s => s.trim()).filter(Boolean);
+        if (!NON_DECL_HEADS.has(headNames[0])) {
+          const declared = declaredNames(line.replace(/^\s*(?:private\s+)?/, ''));
+          if (declared.length > 0) {
+            let searchFrom = 0;
+            for (const entry of declared) {
+              const ch = line.indexOf(entry.name, searchFrom);
+              if (ch >= 0) searchFrom = ch + entry.name.length;
+              symbols.push({
+                name: entry.name,
+                kind: 'variable',
+                line: i,
+                char: ch >= 0 ? ch : line.indexOf(entry.name),
+                declaration: sourceLines[i].trim(),
+                type: entry.type,
+              });
+            }
           }
         }
       }
