@@ -66,6 +66,42 @@ export function refreshWorkspaceIndex(openDocs?: Map<string, string>): void {
   }
 }
 
+export function refreshWorkspaceIndexAsync(openDocs?: Map<string, string>, onDone?: () => void): void {
+  const files = new Set<string>();
+  for (const r of roots) walk(r, files);
+  const list = Array.from(files);
+  const next = new Map<string, WorkspaceFile>();
+  let i = 0;
+  const BATCH = 25;
+  const step = () => {
+    const end = Math.min(i + BATCH, list.length);
+    for (; i < end; i++) {
+      const p = list[i];
+      try {
+        const uri = pathToFileURL(p).toString();
+        const text = openDocs?.get(uri) ?? fs.readFileSync(p, 'utf8');
+        next.set(uri, { uri, path: p, text, symbols: scanSymbols(text) });
+      } catch { /* ignore */ }
+    }
+    if (i < list.length) {
+      setImmediate(step);
+      return;
+    }
+    if (openDocs) {
+      for (const [uri, text] of openDocs.entries()) {
+        if (!uri.endsWith('.gray')) continue;
+        try {
+          next.set(uri, { uri, path: uri.startsWith('file://') ? fileURLToPath(uri) : uri, text, symbols: scanSymbols(text) });
+        } catch { /* ignore */ }
+      }
+    }
+    index.clear();
+    for (const [k, v] of next.entries()) index.set(k, v);
+    onDone?.();
+  };
+  setImmediate(step);
+}
+
 export function upsertIndexedDocument(uri: string, text: string): void {
   try {
     const p = uri.startsWith('file://') ? fileURLToPath(uri) : uri;

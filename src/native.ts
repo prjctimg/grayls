@@ -112,7 +112,6 @@ function initialize(params: any): unknown {
     for (const f of params.workspaceFolders) if (f?.uri) roots.push(f.uri);
   }
   setWorkspaceRoots(roots);
-  try { refreshWorkspaceIndex(openDocsMap()); } catch { /* ignore */ }
   return {
     capabilities: {
       // Full sync keeps the native wire protocol small; Neovim respects it.
@@ -195,6 +194,7 @@ function dispatch(method: string, params: any): unknown {
 function handleNotification(method: string, params: any): void {
   switch (method) {
     case 'initialized':
+      try { refreshWorkspaceIndex(openDocsMap()); } catch { /* ignore */ }
       return;
     case 'textDocument/didOpen': {
       const doc = params.textDocument;

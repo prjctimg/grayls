@@ -42,7 +42,7 @@ import { provideWorkspaceSymbols } from './features/workspaceSymbols';
 import { provideDocumentHighlights } from './features/documentHighlight';
 import { provideFoldingRanges } from './features/foldingRange';
 import { provideSelectionRanges } from './features/selectionRange';
-import { refreshWorkspaceIndex, setWorkspaceRoots, upsertIndexedDocument } from './utils/workspace';
+import { refreshWorkspaceIndex, refreshWorkspaceIndexAsync, setWorkspaceRoots, upsertIndexedDocument } from './utils/workspace';
 
 // Create connection using stdio (works for VS Code IPC and Zed LSP)
 const connection = createConnection(ProposedFeatures.all);
@@ -86,7 +86,6 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
     for (const f of params.workspaceFolders) if (f?.uri) roots.push(f.uri);
   }
   setWorkspaceRoots(roots);
-  syncWorkspaceIndex();
 
   return {
     capabilities: {
@@ -115,6 +114,14 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       version: '0.1.0',
     },
   };
+});
+
+connection.onInitialized(() => {
+  try {
+    const open = new Map<string, string>();
+    for (const d of documents.all()) open.set(d.uri, d.getText());
+    refreshWorkspaceIndexAsync(open);
+  } catch { /* ignore */ }
 });
 
 // Register diagnostics (runs gray check on open/save/change)
