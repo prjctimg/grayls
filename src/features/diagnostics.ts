@@ -46,6 +46,35 @@ function cacheKey(text: string): string {
   return `${text.length}:${head}:${tail}`;
 }
 
+function parseDiagnosticsJson(output: string): Diagnostic[] | null {
+  const trimmed = output.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const obj = JSON.parse(trimmed) as { diagnostics?: any[] };
+    if (!obj || !Array.isArray(obj.diagnostics)) return null;
+    const diags: Diagnostic[] = [];
+    for (const d of obj.diagnostics) {
+      const sev = d?.severity === 'error' ? DiagnosticSeverity.Error
+        : d?.severity === 'warning' ? DiagnosticSeverity.Warning
+        : null;
+      if (!sev) continue;
+      const line = Math.max(0, (Number(d.line) || 1) - 1);
+      const col = Math.max(0, (Number(d.column) || 1) - 1);
+      const endCol = Math.max(col + 1, (Number(d.endColumn) || (col + 1)));
+      diags.push({
+        range: { start: { line, character: col }, end: { line, character: endCol } },
+        severity: sev,
+        code: typeof d.code === 'string' ? d.code : undefined,
+        message: typeof d.message === 'string' ? d.message : String(d.message ?? ''),
+        source: 'grayc',
+      });
+    }
+    return diags;
+  } catch {
+    return null;
+  }
+}
+
 /** Run `gray check` on a temporary copy and parse the compiler diagnostics. */
 export function computeDiagnostics(text: string): Diagnostic[] {
   const key = cacheKey(text);
@@ -66,14 +95,21 @@ export function computeDiagnostics(text: string): Diagnostic[] {
   }
 
   try {
-    // 'gray check' type-checks only. Bare 'gray <file>' would compile AND run
-    // the program, executing its I/O on every keystroke.
-    const result = cp.spawnSync('gray', ['check', tmpFile], {
+    // Prefer structured JSON diagnostics (newer grayc), fall back to text parsing.
+    const jsonResult = cp.spawnSync('gray', ['check', '--diagnostic-format=json', tmpFile], {
       encoding: 'utf8',
       timeout: 10_000,
     });
-    const output = (result.stdout ?? '') + (result.stderr ?? '');
-    const diags = parseDiagnostics(output);
+    const jsonOut = (jsonResult.stdout ?? '') + (jsonResult.stderr ?? '');
+    let diags = parseDiagnosticsJson(jsonOut);
+    if (diags === null) {
+      const result = cp.spawnSync('gray', ['check', tmpFile], {
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      const output = (result.stdout ?? '') + (result.stderr ?? '');
+      diags = parseDiagnostics(output);
+    }
     diagCache.set(key, { at: now, diags });
     return diags;
   } catch {
