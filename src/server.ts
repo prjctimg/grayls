@@ -18,6 +18,9 @@ import {
   SemanticTokensParams,
   CodeActionParams,
   WorkspaceSymbolParams,
+  DocumentHighlightParams,
+  FoldingRangeParams,
+  SelectionRangeParams,
   ResponseError,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -36,6 +39,9 @@ import { provideInlayHints } from './features/inlayHints';
 import { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } from './features/semanticTokens';
 import { provideCodeActions } from './features/codeActions';
 import { provideWorkspaceSymbols } from './features/workspaceSymbols';
+import { provideDocumentHighlights } from './features/documentHighlight';
+import { provideFoldingRanges } from './features/foldingRange';
+import { provideSelectionRanges } from './features/selectionRange';
 import { refreshWorkspaceIndex, setWorkspaceRoots, upsertIndexedDocument } from './utils/workspace';
 
 // Create connection using stdio (works for VS Code IPC and Zed LSP)
@@ -100,6 +106,9 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       semanticTokensProvider: { legend: SEMANTIC_TOKENS_LEGEND as any, full: true },
       codeActionProvider: true,
       workspaceSymbolProvider: true,
+      documentHighlightProvider: true,
+      foldingRangeProvider: true,
+      selectionRangeProvider: true,
     },
     serverInfo: {
       name: 'GrayLS',
@@ -177,6 +186,18 @@ connection.onCodeAction((params: CodeActionParams) =>
 // Workspace symbols
 connection.onWorkspaceSymbol((params: WorkspaceSymbolParams) =>
   safe(() => provideWorkspaceSymbols(params as any, documents) as never, [] as never),
+);
+
+connection.onDocumentHighlight((params: DocumentHighlightParams) =>
+  safe(() => provideDocumentHighlights(params as any, documents) as never, [] as never),
+);
+
+connection.onFoldingRanges((params: FoldingRangeParams) =>
+  safe(() => provideFoldingRanges(params as any, documents) as never, [] as never),
+);
+
+connection.onSelectionRanges((params: SelectionRangeParams) =>
+  safe(() => provideSelectionRanges(params as any, documents) as never, [] as never),
 );
 
 connection.onDidChangeWatchedFiles(() => syncWorkspaceIndex());

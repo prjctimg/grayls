@@ -4,14 +4,19 @@ A Language Server Protocol (LSP) implementation for the [Grayscale programming l
 
 ## Features
 
-- **Diagnostics** — inline errors and warnings powered by `gray`
-- **Completion** — keywords, types, builtins, stdlib modules, and in-file symbols
-- **Hover docs** — documentation for all Grayscale keywords, types, and builtins
-- **Go to definition** — jump to variable, `const`, function (`do`/`fn`), `struct`, `enum`, and `alias` declarations within the current file
-- **Document symbols** — outline functions, types, and variables with full block ranges
-- **References** — find every file-local use of a symbol
-- **Rename** — file-local, name-based rename that skips comments, strings, and member accesses
+- **Diagnostics** — inline errors and warnings powered by `gray check` (debounced)
+- **Completion** — keywords, types, builtins, stdlib modules, symbols, and member completion
+- **Hover docs** — docs for keywords, types, builtins, stdlib, and resolved symbols
+- **Go to definition** — local and top-level cross-file definition via workspace index
+- **References** — file-local and top-level cross-file references
+- **Rename** — safe rename with prepareRename; top-level cross-file rename support
+- **Document symbols / workspace symbols** — outline and workspace symbol search
 - **Formatting** — `textDocument/formatting` backed by `gray fmt`
+- **Signature help** — parameter signatures for user-defined functions
+- **Inlay hints** — parameter hints, EOL diagnostic hints, and `#test` status hints
+- **Semantic tokens** — lexical + symbol-aware semantic highlighting
+- **Code actions** — quick fixes such as adding missing stdlib imports
+- **Document highlight / folding / selection range** — standard editor navigation UX
 
 ---
 

@@ -36,10 +36,29 @@ export function parseDiagnostics(output: string): Diagnostic[] {
   return diags;
 }
 
+const diagCache = new Map<string, { at: number; diags: Diagnostic[] }>();
+const DIAG_CACHE_TTL = 1500;
+
+function cacheKey(text: string): string {
+  // cheap key: length + head/tail sample
+  const head = text.slice(0, 256);
+  const tail = text.slice(-256);
+  return `${text.length}:${head}:${tail}`;
+}
+
 /** Run `gray check` on a temporary copy and parse the compiler diagnostics. */
 export function computeDiagnostics(text: string): Diagnostic[] {
+  const key = cacheKey(text);
+  const now = Date.now();
+  const cached = diagCache.get(key);
+  if (cached && now - cached.at < DIAG_CACHE_TTL) return cached.diags;
+  if (diagCache.size > 32) {
+    const first = diagCache.keys().next().value;
+    if (first) diagCache.delete(first);
+  }
+
   // Write to a temp file so gray can read it (handles unsaved buffers too)
-  const tmpFile = path.join(os.tmpdir(), `gray-lsp-${process.pid}.gray`);
+  const tmpFile = path.join(os.tmpdir(), `gray-lsp-${process.pid}-${Math.random().toString(36).slice(2)}.gray`);
   try {
     fs.writeFileSync(tmpFile, text, 'utf8');
   } catch {
@@ -54,7 +73,9 @@ export function computeDiagnostics(text: string): Diagnostic[] {
       timeout: 10_000,
     });
     const output = (result.stdout ?? '') + (result.stderr ?? '');
-    return parseDiagnostics(output);
+    const diags = parseDiagnostics(output);
+    diagCache.set(key, { at: now, diags });
+    return diags;
   } catch {
     return [];
   } finally {

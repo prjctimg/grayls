@@ -23,6 +23,9 @@ import { provideInlayHints } from './features/inlayHints';
 import { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } from './features/semanticTokens';
 import { provideCodeActions } from './features/codeActions';
 import { provideWorkspaceSymbols } from './features/workspaceSymbols';
+import { provideDocumentHighlights } from './features/documentHighlight';
+import { provideFoldingRanges } from './features/foldingRange';
+import { provideSelectionRanges } from './features/selectionRange';
 import { setWorkspaceRoots, refreshWorkspaceIndex, upsertIndexedDocument } from './utils/workspace';
 
 interface NativeDocument {
@@ -129,6 +132,9 @@ function initialize(params: any): unknown {
       semanticTokensProvider: { legend: SEMANTIC_TOKENS_LEGEND, full: true },
       codeActionProvider: true,
       workspaceSymbolProvider: true,
+      documentHighlightProvider: true,
+      foldingRangeProvider: true,
+      selectionRangeProvider: true,
     },
     serverInfo: {
       name: 'GrayLS',
@@ -169,6 +175,12 @@ function dispatch(method: string, params: any): unknown {
       return provideCodeActions(params, store);
     case 'workspace/symbol':
       return provideWorkspaceSymbols(params, store);
+    case 'textDocument/documentHighlight':
+      return provideDocumentHighlights(params, store);
+    case 'textDocument/foldingRange':
+      return provideFoldingRanges(params, store);
+    case 'textDocument/selectionRange':
+      return provideSelectionRanges(params, store);
     case 'workspace/didChangeWatchedFiles':
     case 'textDocument/didChangeConfiguration':
       try { refreshWorkspaceIndex(openDocsMap()); } catch {}
@@ -243,6 +255,9 @@ function safeRequestResult(method: string, err: unknown): unknown {
     case 'textDocument/codeAction':
     case 'workspace/symbol':
     case 'textDocument/references':
+    case 'textDocument/documentHighlight':
+    case 'textDocument/foldingRange':
+    case 'textDocument/selectionRange':
       return [];
     case 'textDocument/hover':
     case 'textDocument/definition':

@@ -136,6 +136,24 @@ export interface DocumentSymbol {
   selectionRange: Range;
 }
 
+export interface DocumentHighlight {
+  range: Range;
+  kind?: number; // 1 Text, 2 Read, 3 Write
+}
+
+export interface FoldingRange {
+  startLine: number;
+  startCharacter?: number;
+  endLine: number;
+  endCharacter?: number;
+  kind?: string; // comment, imports, region
+}
+
+export interface SelectionRange {
+  range: Range;
+  parent?: SelectionRange;
+}
+
 /** LSP `CompletionItemKind` values used by this server. */
 export const CompletionItemKind = {
   Function: 3,
@@ -173,6 +191,20 @@ export const CodeActionKind = {
   QuickFix: 'quickfix',
   Refactor: 'refactor',
   Source: 'source',
+};
+
+/** LSP `DocumentHighlightKind` values. */
+export const DocumentHighlightKind = {
+  Text: 1,
+  Read: 2,
+  Write: 3,
+};
+
+/** LSP `FoldingRangeKind` values. */
+export const FoldingRangeKind = {
+  Comment: 'comment',
+  Imports: 'imports',
+  Region: 'region',
 };
 
 /** LSP `DiagnosticSeverity` values used by this server. */

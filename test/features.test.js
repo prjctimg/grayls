@@ -48,7 +48,7 @@ const SYMBOL_TEXT = [
   '    mut total i64 = add(count, 2)',
   '    println(total)',
   '}',
-].join('\n');
+].join(String.fromCharCode(10));
 
 test('document symbols include declarations and full block ranges', () => {
   const symbols = provideDocumentSymbols(
@@ -80,7 +80,7 @@ const REFERENCE_TEXT = [
   '    count = count + 1',
   '    math.count()',
   '}',
-].join('\n');
+].join(String.fromCharCode(10));
 
 test('references include declarations and skip comments, strings, and members', () => {
   const documents = fakeDocuments(REFERENCE_TEXT);
@@ -182,6 +182,9 @@ const { provideInlayHints } = require('../out/features/inlayHints');
 const { provideSemanticTokens, SEMANTIC_TOKENS_LEGEND } = require('../out/features/semanticTokens');
 const { provideCodeActions } = require('../out/features/codeActions');
 const { provideWorkspaceSymbols } = require('../out/features/workspaceSymbols');
+const { provideDocumentHighlights } = require('../out/features/documentHighlight');
+const { provideFoldingRanges } = require('../out/features/foldingRange');
+const { provideSelectionRanges } = require('../out/features/selectionRange');
 const { setWorkspaceRoots, refreshWorkspaceIndex } = require('../out/utils/workspace');
 
 test('hover resolves variables and parameters', () => {
@@ -190,7 +193,7 @@ test('hover resolves variables and parameters', () => {
     '    mut total i64 = a + b',
     '    return total',
     '}',
-  ].join('\n');
+  ].join(String.fromCharCode(10));
   const documents = fakeDocuments(text);
   const paramHover = provideHover({ textDocument: { uri: URI }, position: { line: 1, character: 20 } }, documents);
   assert.ok(paramHover);
@@ -207,7 +210,7 @@ test('definition resolves parameters', () => {
     'do add(a i64, b i64) -> i64 {',
     '    return a + b',
     '}',
-  ].join('\n');
+  ].join(String.fromCharCode(10));
   const documents = fakeDocuments(text);
   const loc = provideDefinition({ textDocument: { uri: URI }, position: { line: 1, character: 11 } }, documents);
   assert.ok(loc);
@@ -222,7 +225,7 @@ test('signature help returns user function signatures', () => {
     'do main() {',
     '    add(1, 2)',
     '}',
-  ].join('\n');
+  ].join(String.fromCharCode(10));
   const documents = fakeDocuments(text);
   const help = provideSignatureHelp({ textDocument: { uri: URI }, position: { line: 4, character: 10 } }, documents);
   assert.ok(help);
@@ -239,7 +242,7 @@ test('inlay hints provide parameter names for calls', () => {
     'do main() {',
     '    add(1, 2)',
     '}',
-  ].join('\n');
+  ].join(String.fromCharCode(10));
   const documents = fakeDocuments(text);
   const hints = provideInlayHints({ textDocument: { uri: URI }, range: { start: { line: 0, character: 0 }, end: { line: 10, character: 0 } } }, documents);
   assert.ok(hints.length >= 2);
@@ -252,7 +255,7 @@ test('semantic tokens return legend-compatible data', () => {
     '    mut total i64 = a + b',
     '    return total',
     '}',
-  ].join('\n');
+  ].join(String.fromCharCode(10));
   const documents = fakeDocuments(text);
   const tokens = provideSemanticTokens({ textDocument: { uri: URI } }, documents);
   assert.ok(SEMANTIC_TOKENS_LEGEND.tokenTypes.length > 0);
@@ -270,4 +273,60 @@ test('code actions and workspace symbols are callable', () => {
   refreshWorkspaceIndex();
   const ws = provideWorkspaceSymbols({ query: '' }, documents);
   assert.ok(Array.isArray(ws));
+});
+
+
+test('document highlight returns symbol occurrences', () => {
+  const text = [
+    'do main() {',
+    '    mut count i64 = 1',
+    '    count = count + 1',
+    '    println(count)',
+    '}',
+  ].join(String.fromCharCode(10));
+  const documents = fakeDocuments(text);
+  const hs = provideDocumentHighlights({ textDocument: { uri: URI }, position: { line: 1, character: 8 } }, documents);
+  assert.ok(hs.length >= 3);
+  assert.ok(hs.every(h => h.range && h.kind));
+});
+
+test('folding ranges include brace blocks and imports', () => {
+  const text = [
+    'import @strings',
+    'import @math',
+    '',
+    'do main() {',
+    '    if true {',
+    '        println("hi")',
+    '    }',
+    '}',
+  ].join(String.fromCharCode(10));
+  const documents = fakeDocuments(text);
+  const ranges = provideFoldingRanges({ textDocument: { uri: URI } }, documents);
+  assert.ok(ranges.some(r => r.kind === 'imports'));
+  assert.ok(ranges.some(r => r.startLine === 3 && r.endLine === 7));
+});
+
+test('selection ranges expand outward', () => {
+  const text = [
+    'do main() {',
+    '    mut count i64 = 1',
+    '}',
+  ].join(String.fromCharCode(10));
+  const documents = fakeDocuments(text);
+  const ranges = provideSelectionRanges({ textDocument: { uri: URI }, positions: [{ line: 1, character: 8 }] }, documents);
+  assert.equal(ranges.length, 1);
+  assert.ok(ranges[0].range);
+  assert.ok(ranges[0].parent);
+});
+
+test('code actions offer missing stdlib import', () => {
+  const text = [
+    'do main() {',
+    '    println(strings.contains("a", "a"))',
+    '}',
+  ].join(String.fromCharCode(10));
+  const documents = fakeDocuments(text);
+  const actions = provideCodeActions({ textDocument: { uri: URI }, range: { start: { line: 1, character: 12 }, end: { line: 1, character: 19 } }, context: { diagnostics: [] } }, documents);
+  assert.ok(actions.some(a => /Add import @strings/.test(a.title)));
 });
